@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-import torch.functional as F
+import torch.nn.functional as F
 
 # Self-Attention block
 class MultiHeadSelfAttention(nn.Module):
