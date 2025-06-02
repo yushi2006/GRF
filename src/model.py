@@ -1,10 +1,52 @@
+import math
 import torch
 import torch.nn as nn
+import torch.functional as F
 
 # Self-Attention block
-class MultiSelfAttention(nn.Module):
-    def __init__(self, embedding_size):
-        super(MultiSelfAttention, self).__init__()
+class MultiHeadSelfAttention(nn.Module):
+    """
+    Implements multi-head self-attention as described in the Transformer architecture.
+
+    Args:
+        d_model (int): The dimensionality of the model.
+        num_heads (int): Number of attention heads.
+
+    Example:
+        attn = MultiHeadSelfAttention(d_model=512, num_heads=8)
+        x = torch.rand(2, 10, 512)  # Batch size 2, sequence length 10
+        output = attn(x)  # Output shape (2, 10, 512)
+    """
+
+    def __init__(self, d_model: int, num_heads: int):
+        super(MultiHeadSelfAttention, self).__init__()
+        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+
+        self.qkv_proj = nn.Linear(d_model, d_model * 3)  # Project input to Q, K, V
+        self.out_proj = nn.Linear(d_model, d_model)  # Final projection layer
+        self.scale = math.sqrt(self.head_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Computes multi-head self-attention.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, d_model).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, seq_len, d_model).
+        """
+        B, T, C = x.shape  # Batch size, sequence length, embedding dim
+        qkv = self.qkv_proj(x).chunk(3, dim=-1)  # Split into Q, K, V
+        q, k, v = [t.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) for t in qkv]
+
+        attn_scores = (q @ k.transpose(-2, -1)) / self.scale  # Scaled dot-product attention
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        attn_output = (attn_probs @ v).transpose(1, 2).contiguous().view(B, T, C)
+
+        return self.out_proj(attn_output)
 
 # Cross-Attention Block
 class MultiCrossAttention(nn.Module):
