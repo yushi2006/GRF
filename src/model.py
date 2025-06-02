@@ -55,8 +55,36 @@ class MultiCrossAttention(nn.Module):
 
 # FeedForward Block
 class FeedForward(nn.Module):
-    def __init__(self):
+    """
+    Implements a position-wise feed-forward network (FFN) used in Transformer blocks.
+
+    Args:
+        d_model (int): The dimensionality of the model.
+        d_ff (int): The hidden layer size in the feed-forward network.
+
+    Example:
+        ffn = FeedForward(d_model=512, d_ff=2048)
+        x = torch.rand(2, 10, 512)
+        output = ffn(x)  # Output shape (2, 10, 512)
+    """
+
+    def __init__(self, d_model: int, d_ff: int):
         super(FeedForward, self).__init__()
+        self.fc1 = nn.Linear(d_model, d_ff)
+        self.fc2 = nn.Linear(d_ff, d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies the feed-forward network.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, d_model).
+
+        Returns:
+            torch.Tensor: Output tensor of the same shape.
+        """
+        return self.fc2(F.gelu(self.fc1(x)))  # GELU activation for non-linearity
+
 
 class ModalityAwareFusion(nn.Module):
     def __init__(self):
