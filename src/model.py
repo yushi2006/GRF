@@ -50,8 +50,50 @@ class MultiHeadSelfAttention(nn.Module):
 
 # Cross-Attention Block
 class MultiCrossAttention(nn.Module):
-    def __init__(self):
+    """
+    Implements multi-head cross-attention.
+
+    Args:
+        d_model (int): Model dimensionality.
+        num_heads (int): Number of attention heads.
+
+    Example:
+        cross_attn = MultiCrossAttention(d_model=512, num_heads=8)
+        x = torch.rand(2, 10, 512)  # Key-value input
+        q = torch.rand(2, 5, 512)   # Query input
+        output = cross_attn(x, q)   # Output shape (2, 5, 512)
+    """
+    def __init__(self, d_model: int, num_heads: int):
         super(MultiCrossAttention, self).__init__()
+        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+
+        self.kv_proj = nn.Linear(d_model, d_model * 2)
+        self.out_proj = nn.Linear(d_model, d_model)
+        self.scale = math.sqrt(self.head_dim)
+    
+    def forward(self, x: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
+        """
+        Computes multi-head cross-attention.
+
+        Args:
+            x (torch.Tensor): Key-value input of shape (batch_size, seq_len_kv, d_model).
+            q (torch.Tensor): Query input of shape (batch_size, seq_len_q, d_model).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, seq_len_q, d_model).
+        """
+        B, T, C = x.shape
+        kv = self.kv_proj(x).chunk(2, dim=-1)
+
+        k, v = [t.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) for t in kv]
+
+        attn_scores = (q @ k.transpose(-2, -1)) / self.scale
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        attn_output = (attn_probs @ v).transpose(1, 2).continguous().view(B, T, C)
+
+        return self.out_proj(attn_output)
 
 # FeedForward Block
 class FeedForward(nn.Module):
