@@ -64,7 +64,7 @@ class MultiCrossModalAttention(nn.Module):
         output = cross_attn(x, q)   # Output shape (2, 5, 512)
     """
     def __init__(self, d_model: int, num_heads: int):
-        super(MultiCrossAttention, self).__init__()
+        super(MultiCrossModalAttention, self).__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
