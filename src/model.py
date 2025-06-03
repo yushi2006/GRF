@@ -39,17 +39,17 @@ class MultiHeadSelfAttention(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, seq_len, d_model).
         """
         B, T, C = x.shape  # Batch size, sequence length, embedding dim
-        qkv = self.qkv_proj(x).chunk(3, dim=-1)  # Split into Q, K, V
-        q, k, v = [t.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) for t in qkv]
+        QKV = self.qkv_proj(x).chunk(3, dim=-1)  # Split into Q, K, V
+        Q, K, V = [t.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) for t in QKV]
 
-        attn_scores = (q @ k.transpose(-2, -1)) / self.scale  # Scaled dot-product attention
+        attn_scores = (Q @ K.transpose(-2, -1)) / self.scale  # Scaled dot-product attention
         attn_probs = F.softmax(attn_scores, dim=-1)
-        attn_output = (attn_probs @ v).transpose(1, 2).contiguous().view(B, T, C)
+        attn_output = (attn_probs @ V).transpose(1, 2).contiguous().view(B, T, C)
 
         return self.out_proj(attn_output)
 
 # Cross-Attention Block
-class MultiCrossAttention(nn.Module):
+class MultiCrossModalAttention(nn.Module):
     """
     Implements multi-head cross-attention.
 
@@ -73,7 +73,7 @@ class MultiCrossAttention(nn.Module):
         self.out_proj = nn.Linear(d_model, d_model)
         self.scale = math.sqrt(self.head_dim)
     
-    def forward(self, x: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, Q: torch.Tensor) -> torch.Tensor:
         """
         Computes multi-head cross-attention.
 
@@ -85,13 +85,13 @@ class MultiCrossAttention(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, seq_len_q, d_model).
         """
         B, T, C = x.shape
-        kv = self.kv_proj(x).chunk(2, dim=-1)
+        KV = self.kv_proj(x).chunk(2, dim=-1)
 
-        k, v = [t.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) for t in kv]
+        K, V = [t.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) for t in KV]
 
-        attn_scores = (q @ k.transpose(-2, -1)) / self.scale
+        attn_scores = (Q @ K.transpose(-2, -1)) / self.scale
         attn_probs = F.softmax(attn_scores, dim=-1)
-        attn_output = (attn_probs @ v).transpose(1, 2).continguous().view(B, T, C)
+        attn_output = (attn_probs @ V).transpose(1, 2).continguous().view(B, T, C)
 
         return self.out_proj(attn_output)
 
