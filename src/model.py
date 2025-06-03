@@ -49,22 +49,22 @@ class MultiHeadSelfAttention(nn.Module):
         return self.out_proj(attn_output)
 
 # Cross-Attention Block
-class MultiCrossModalAttention(nn.Module):
+class MultiHeadCrossModalAttention(nn.Module):
     """
-    Implements multi-head cross-attention.
+    Implements multi-head cross-modal-attention.
 
     Args:
         d_model (int): Model dimensionality.
         num_heads (int): Number of attention heads.
 
     Example:
-        cross_attn = MultiCrossAttention(d_model=512, num_heads=8)
+        cross_attn = MultiHeadCrossModalAttention(d_model=512, num_heads=8)
         x = torch.rand(2, 10, 512)  # Key-value input
         q = torch.rand(2, 5, 512)   # Query input
         output = cross_attn(x, q)   # Output shape (2, 5, 512)
     """
     def __init__(self, d_model: int, num_heads: int):
-        super(MultiCrossModalAttention, self).__init__()
+        super(MultiHeadCrossModalAttention, self).__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
@@ -76,7 +76,7 @@ class MultiCrossModalAttention(nn.Module):
     
     def forward(self, x: torch.Tensor, Q: torch.Tensor) -> torch.Tensor:
         """
-        Computes multi-head cross-attention.
+        Computes multi-head cross-modal-attention.
 
         Args:
             x (torch.Tensor): Key-value input of shape (batch_size, seq_len_kv, d_model).
