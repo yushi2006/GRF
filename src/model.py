@@ -2,6 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import List
 
 # Self-Attention block
 class MultiHeadSelfAttention(nn.Module):
@@ -109,6 +110,7 @@ class FeedForward(nn.Module):
 
     Args:
         d_model (int): The dimensionality of the model.
+        num_modalities (int): The number of modalities to fuse
         d_ff (int): The hidden layer size in the feed-forward network.
 
     Example:
@@ -117,9 +119,9 @@ class FeedForward(nn.Module):
         output = ffn(x)  # Output shape (2, 10, 512)
     """
 
-    def __init__(self, d_model: int, d_ff: int):
+    def __init__(self, d_model: int, num_modalities: int,  d_ff: int):
         super(FeedForward, self).__init__()
-        self.fc1 = nn.Linear(d_model, d_ff)
+        self.fc1 = nn.Linear(num_modalities*d_model, d_ff)
         self.fc2 = nn.Linear(d_ff, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -136,5 +138,58 @@ class FeedForward(nn.Module):
 
 
 class ModalityAwareFusion(nn.Module):
-    def __init__(self):
+    """
+    Implements a Modality-Aware Fusion block combining self-attention, cross-modal attention,
+    and feed-forward projection to merge two modalities in a multimodal-aware space.
+
+    Args:
+        d_model (int): Dimensionality of the model.
+        num_modalities (int): The number of modalities to fuse.
+        num_heads (int): Number of attention heads.
+        devices (List[str]): List of devices to use for parallel computation (e.g., ["cuda:0", "cuda:1"]).
+
+    Example:
+        fusion = ModalityAwareFusion(d_model=512, num_heads=8, devices=["cuda:0", "cuda:1"])
+        x = torch.rand(2, 10, 512).to("cuda:0")  # Modality 1
+        y = torch.rand(2, 15, 512).to("cuda:1")  # Modality 2
+        output = fusion(x, y)  # Output shape (2, min(T_x, T_y), 512)
+    """
+    def __init__(self, d_model: int, num_modalities: int, num_heads: int, devices: List[str]):
         super(ModalityAwareFusion, self).__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = 4* d_model
+        self.devices = devices
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+        self.norm4 = nn.LayerNorm(d_model)
+        self.norm5 = nn.LayerNorm(d_model)
+        
+        self.self_attn_head1 = MultiHeadSelfAttention(d_model, num_heads)
+        self.self_attn_head2 = MultiHeadSelfAttention(d_model, num_heads)
+        
+        self.cross_modal_attn1 = MultiHeadCrossModalAttention(d_model, num_heads)
+        self.cross_modal_attn2 = MultiHeadCrossModalAttention(d_model, num_heads)
+        
+        self.ffn = FeedForward(d_model, num_modalities, self.d_ff)
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        # Move each modality into another devices for parallel computation
+        x = x.to(self.devices[0])
+        y = y.to(self.devices[1])
+
+        # Self attention Layers
+        x = self.norm1(x +self.self_attn_head1(x)) # (B, T_A, d_model)
+        y = self.norm2(y + self.self_attn_head2(y)) # (B, T_B, d_model)
+
+        # Cross-Modal Layers
+        x = self.norm3(x + self.cross_modal_attn1(x, y))
+        y = self.norm4(y + self.cross_modal_attn2(y, x))
+
+        # Feed-Forward Layers for projecting in a multimodal space
+        xy = torch.cat([x, y], axis=-1)
+        
+        return xy + self.norm5(self.ffn(xy))
+
