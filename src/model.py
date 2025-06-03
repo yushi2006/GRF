@@ -69,6 +69,7 @@ class MultiCrossModalAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
 
+        self.q_proj = nn.Linear(d_model, d_model)
         self.kv_proj = nn.Linear(d_model, d_model * 2)
         self.out_proj = nn.Linear(d_model, d_model)
         self.scale = math.sqrt(self.head_dim)
@@ -85,13 +86,19 @@ class MultiCrossModalAttention(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, seq_len_q, d_model).
         """
         B, T, C = x.shape
+        Q = self.q_proj(Q)
+        Q_T = Q.size(1)
         KV = self.kv_proj(x).chunk(2, dim=-1)
 
         K, V = [t.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) for t in KV]
 
-        attn_scores = (Q @ K.transpose(-2, -1)) / self.scale
+        Q = Q.view(B, Q_T, self.num_heads, self.head_dim).transpose(1, 2)
+        K = K.reshape(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.reshape(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+
+        attn_scores = (Q @ K.transpose(-2, -1)) / self.scale # (B, num_heads, Q_T, T)
         attn_probs = F.softmax(attn_scores, dim=-1)
-        attn_output = (attn_probs @ V).transpose(1, 2).continguous().view(B, T, C)
+        attn_output = (attn_probs @ V).transpose(1, 2).contiguous().view(B, Q_T, C) # (B, num_heads, Q_T, head_dim) => (B, Q_T, num_heads, head_dim) => (B, Q_T, C)
 
         return self.out_proj(attn_output)
 
