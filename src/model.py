@@ -97,8 +97,9 @@ class ModuleType(Enum):
     FFN = 1
 
 class ResidualBlock(nn.Module):
-    def __init__(self, d_model: int, module_type: ModuleType = ModuleType.FFN, **kwargs):
+    def __init__(self, d_model: int, module_type: ModuleType = ModuleType.FFN, prenorm: bool = False, **kwargs):
         super(ResidualBlock, self).__init__()
+        self.prenorm = prenorm
         self.norm = nn.LayerNorm(d_model)
 
         if module_type == ModuleType.FFN:
@@ -110,9 +111,17 @@ class ResidualBlock(nn.Module):
             self.module = MultiHeadCrossModalAttention(d_model, num_heads)
     
     def forward(self, x: torch.Tensor):
-        x = x + self.module(x)
+        if self.prenorm:
+            out = x + self.norm(self.module(x))
+        else:
+            out = self.norm(x + self.module(x))
 
-        return self.norm(x)
+        return out
+
+class Mode(Enum):
+    BI = 0
+    X2Y = 1
+    Y2X = 2
 
 class ModalityAwareFusion(nn.Module):
     """
@@ -131,15 +140,17 @@ class ModalityAwareFusion(nn.Module):
         y = torch.rand(2, 15, 512).to("cuda:1")  # Modality 2
         output = fusion(x, y)  # Output shape (2, min(T_x, T_y), 512)
     """
-    def __init__(self, d_model: int, num_modalities: int, num_heads: int, devices: List[str]):
+    def __init__(self, d_model: int, num_modalities: int, num_heads: int, devices: List[str], mode: Mode = Mode.BI):
         super(ModalityAwareFusion, self).__init__()
         self.d_model = d_model
         self.num_heads = num_heads
         self.d_ff = 4* d_model
         self.devices = devices
         
-        self.cross_modal_attn1 = ResidualBlock(d_model, ModuleType.CrossAttention, num_heads=num_heads)
-        self.cross_modal_attn2 = ResidualBlock(d_model, ModuleType.CrossAttention, num_heads=num_heads)
+        if mode == Mode.BI:
+            self.cross_modal_attns = nn.ModuleList([ResidualBlock(d_model, ModuleType.CrossAttention, num_heads=num_heads) for i in range(2)])
+        elif mode == Mode.X2Y or mode == Mode.Y2X:
+            self.cross_modal_attns = ResidualBlock([ResidualBlock(d_model, ModuleType.CrossAttention, num_heads=num_heads)])
         
         self.ffn = ResidualBlock(d_model, ModuleType.FFN, num_modalities=num_modalities, d_ff=self.d_ff)
 
@@ -149,11 +160,14 @@ class ModalityAwareFusion(nn.Module):
         y = y.to(self.devices[1])
 
         # Cross-Modal Layers
-        x = self.cross_modal_attn1(x, y)
-        y = self.cross_modal_attn2(y, x)
+        if self.mode == Mode.BI:
+            x2y = self.cross_modal_attns[0](x, y)
+            y2x = self.cross_modal_attns[1](y, x)
+            out = torch.cat([x2y, y2x], axis=-1)
+        elif self.mode == Mode.X2Y:
+            out = self.cross_modal_attns[0](x, y)
+        elif self.mode == Mode.Y2X:
+            out = self.cross_modal_attns[0](y, x)
 
-        # Feed-Forward Layers for projecting in a multimodal space
-        xy = torch.cat([x, y], axis=-1)
-        
-        return xy + self.ffn(xy)
+        return self.ffn(out)
 
