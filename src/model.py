@@ -3,51 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import List
-
-# Self-Attention block
-class MultiHeadSelfAttention(nn.Module):
-    """
-    Implements multi-head self-attention as described in the Transformer architecture.
-
-    Args:
-        d_model (int): The dimensionality of the model.
-        num_heads (int): Number of attention heads.
-
-    Example:
-        attn = MultiHeadSelfAttention(d_model=512, num_heads=8)
-        x = torch.rand(2, 10, 512)  # Batch size 2, sequence length 10
-        output = attn(x)  # Output shape (2, 10, 512)
-    """
-
-    def __init__(self, d_model: int, num_heads: int):
-        super(MultiHeadSelfAttention, self).__init__()
-        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
-        self.num_heads = num_heads
-        self.head_dim = d_model // num_heads
-
-        self.qkv_proj = nn.Linear(d_model, d_model * 3)  # Project input to Q, K, V
-        self.out_proj = nn.Linear(d_model, d_model)  # Final projection layer
-        self.scale = math.sqrt(self.head_dim)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Computes multi-head self-attention.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, d_model).
-
-        Returns:
-            torch.Tensor: Output tensor of shape (batch_size, seq_len, d_model).
-        """
-        B, T, C = x.shape  # Batch size, sequence length, embedding dim
-        QKV = self.qkv_proj(x).chunk(3, dim=-1)  # Split into Q, K, V
-        Q, K, V = [t.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) for t in QKV]
-
-        attn_scores = (Q @ K.transpose(-2, -1)) / self.scale  # Scaled dot-product attention
-        attn_probs = F.softmax(attn_scores, dim=-1)
-        attn_output = (attn_probs @ V).transpose(1, 2).contiguous().view(B, T, C)
-
-        return self.out_proj(attn_output)
+from enum import Enum
 
 # Cross-Attention Block
 class MultiHeadCrossModalAttention(nn.Module):
@@ -136,6 +92,27 @@ class FeedForward(nn.Module):
         """
         return self.fc2(F.gelu(self.fc1(x)))  # GELU activation for non-linearity
 
+class ModuleType(Enum):
+    CrossAttention = 0
+    FFN = 1
+
+class ResidualBlock(nn.Module):
+    def __init__(self, d_model: int, module_type: ModuleType = ModuleType.FFN, **kwargs):
+        super(ResidualBlock, self).__init__()
+        self.norm = nn.LayerNorm(d_model)
+
+        if module_type == ModuleType.FFN:
+            num_modalities = kwargs['num_modalities']
+            d_ff = kwargs['d_ff']
+            self.module = FeedForward(d_model, num_modalities, d_ff)
+        elif module_type == ModuleType.CrossAttention:
+            num_heads = kwargs['num_heads']
+            self.module = MultiHeadCrossModalAttention(d_model, num_heads)
+    
+    def forward(self, x: torch.Tensor):
+        x = x + self.module(x)
+
+        return self.norm(x)
 
 class ModalityAwareFusion(nn.Module):
     """
@@ -160,36 +137,23 @@ class ModalityAwareFusion(nn.Module):
         self.num_heads = num_heads
         self.d_ff = 4* d_model
         self.devices = devices
-
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
-        self.norm4 = nn.LayerNorm(d_model)
-        self.norm5 = nn.LayerNorm(d_model)
         
-        self.self_attn_head1 = MultiHeadSelfAttention(d_model, num_heads)
-        self.self_attn_head2 = MultiHeadSelfAttention(d_model, num_heads)
+        self.cross_modal_attn1 = ResidualBlock(d_model, ModuleType.CrossAttention, num_heads=num_heads)
+        self.cross_modal_attn2 = ResidualBlock(d_model, ModuleType.CrossAttention, num_heads=num_heads)
         
-        self.cross_modal_attn1 = MultiHeadCrossModalAttention(d_model, num_heads)
-        self.cross_modal_attn2 = MultiHeadCrossModalAttention(d_model, num_heads)
-        
-        self.ffn = FeedForward(d_model, num_modalities, self.d_ff)
+        self.ffn = ResidualBlock(d_model, ModuleType.FFN, num_modalities=num_modalities, d_ff=self.d_ff)
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         # Move each modality into another devices for parallel computation
         x = x.to(self.devices[0])
         y = y.to(self.devices[1])
 
-        # Self attention Layers
-        x = self.norm1(x +self.self_attn_head1(x)) # (B, T_A, d_model)
-        y = self.norm2(y + self.self_attn_head2(y)) # (B, T_B, d_model)
-
         # Cross-Modal Layers
-        x = self.norm3(x + self.cross_modal_attn1(x, y))
-        y = self.norm4(y + self.cross_modal_attn2(y, x))
+        x = self.cross_modal_attn1(x, y)
+        y = self.cross_modal_attn2(y, x)
 
         # Feed-Forward Layers for projecting in a multimodal space
         xy = torch.cat([x, y], axis=-1)
         
-        return xy + self.norm5(self.ffn(xy))
+        return xy + self.ffn(xy)
 

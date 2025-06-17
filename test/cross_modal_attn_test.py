@@ -10,14 +10,14 @@ from torch.testing import assert_close
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.model import MultiCrossModalAttention
+from src.model import MultiHeadCrossModalAttention
 
 class TestMultiCrossModalAttention(unittest.TestCase):
     def setUp(self):
         torch.manual_seed(42)
         self.d_model = 512
         self.num_heads = 8
-        self.attn = MultiCrossModalAttention(self.d_model, self.num_heads)
+        self.attn = MultiHeadCrossModalAttention(self.d_model, self.num_heads)
         
     def test_output_shape(self):
         """Test output shapes for different input sequences."""
