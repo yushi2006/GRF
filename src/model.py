@@ -1,9 +1,11 @@
 import math
+from enum import Enum
+from typing import List, Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import List
-from enum import Enum
+
 
 # Cross-Attention Block
 class MultiHeadCrossModalAttention(nn.Module):
@@ -20,6 +22,7 @@ class MultiHeadCrossModalAttention(nn.Module):
         q = torch.rand(2, 5, 512)   # Query input
         output = cross_attn(x, q)   # Output shape (2, 5, 512)
     """
+
     def __init__(self, d_model: int, num_heads: int):
         super(MultiHeadCrossModalAttention, self).__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
@@ -30,7 +33,7 @@ class MultiHeadCrossModalAttention(nn.Module):
         self.kv_proj = nn.Linear(d_model, d_model * 2)
         self.out_proj = nn.Linear(d_model, d_model)
         self.scale = math.sqrt(self.head_dim)
-    
+
     def forward(self, x: torch.Tensor, Q: torch.Tensor) -> torch.Tensor:
         """
         Computes multi-head cross-modal-attention.
@@ -53,11 +56,14 @@ class MultiHeadCrossModalAttention(nn.Module):
         K = K.reshape(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         V = V.reshape(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
-        attn_scores = (Q @ K.transpose(-2, -1)) / self.scale # (B, num_heads, Q_T, T)
+        attn_scores = (Q @ K.transpose(-2, -1)) / self.scale  # (B, num_heads, Q_T, T)
         attn_probs = F.softmax(attn_scores, dim=-1)
-        attn_output = (attn_probs @ V).transpose(1, 2).contiguous().view(B, Q_T, C) # (B, num_heads, Q_T, head_dim) => (B, Q_T, num_heads, head_dim) => (B, Q_T, C)
+        attn_output = (
+            (attn_probs @ V).transpose(1, 2).contiguous().view(B, Q_T, C)
+        )  # (B, num_heads, Q_T, head_dim) => (B, Q_T, num_heads, head_dim) => (B, Q_T, C)
 
         return self.out_proj(attn_output)
+
 
 # FeedForward Block
 class FeedForward(nn.Module):
@@ -75,9 +81,9 @@ class FeedForward(nn.Module):
         output = ffn(x)  # Output shape (2, 10, 512)
     """
 
-    def __init__(self, d_model: int, num_modalities: int,  d_ff: int):
+    def __init__(self, d_model: int, num_modalities: int, d_ff: int):
         super(FeedForward, self).__init__()
-        self.fc1 = nn.Linear(num_modalities*d_model, d_ff)
+        self.fc1 = nn.Linear(d_model, d_ff)
         self.fc2 = nn.Linear(d_ff, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -92,82 +98,99 @@ class FeedForward(nn.Module):
         """
         return self.fc2(F.gelu(self.fc1(x)))  # GELU activation for non-linearity
 
+
 class ModuleType(Enum):
     CrossAttention = 0
     FFN = 1
 
+
 class ResidualBlock(nn.Module):
-    def __init__(self, d_model: int, module_type: ModuleType = ModuleType.FFN, prenorm: bool = False, **kwargs):
+    def __init__(
+        self,
+        d_model: int,
+        module_type: ModuleType = ModuleType.FFN,
+        prenorm: bool = False,
+        **kwargs,
+    ):
         super(ResidualBlock, self).__init__()
         self.prenorm = prenorm
         self.norm = nn.LayerNorm(d_model)
 
         if module_type == ModuleType.FFN:
-            num_modalities = kwargs['num_modalities']
-            d_ff = kwargs['d_ff']
+            num_modalities = kwargs["num_modalities"]
+            d_ff = kwargs["d_ff"]
             self.module = FeedForward(d_model, num_modalities, d_ff)
         elif module_type == ModuleType.CrossAttention:
-            num_heads = kwargs['num_heads']
+            num_heads = kwargs["num_heads"]
             self.module = MultiHeadCrossModalAttention(d_model, num_heads)
-    
-    def forward(self, x: torch.Tensor):
-        if self.prenorm:
-            out = x + self.norm(self.module(x))
+
+    def forward(
+        self, x: torch.Tensor, context: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        if isinstance(self.module, MultiHeadCrossModalAttention):
+            out = self.module(x, context)
         else:
-            out = self.norm(x + self.module(x))
+            out = self.module(x)
+
+        if self.prenorm:
+            out = x + self.norm(out)
+        else:
+            out = self.norm(x + out)
 
         return out
+
 
 class Mode(Enum):
     BI = 0
     X2Y = 1
     Y2X = 2
 
+
 class ModalityAwareFusion(nn.Module):
-    """
-    Implements a Modality-Aware Fusion block combining self-attention, cross-modal attention,
-    and feed-forward projection to merge two modalities in a multimodal-aware space.
-
-    Args:
-        d_model (int): Dimensionality of the model.
-        num_modalities (int): The number of modalities to fuse.
-        num_heads (int): Number of attention heads.
-        devices (List[str]): List of devices to use for parallel computation (e.g., ["cuda:0", "cuda:1"]).
-
-    Example:
-        fusion = ModalityAwareFusion(d_model=512, num_heads=8, devices=["cuda:0", "cuda:1"])
-        x = torch.rand(2, 10, 512).to("cuda:0")  # Modality 1
-        y = torch.rand(2, 15, 512).to("cuda:1")  # Modality 2
-        output = fusion(x, y)  # Output shape (2, min(T_x, T_y), 512)
-    """
-    def __init__(self, d_model: int, num_modalities: int, num_heads: int, devices: List[str], mode: Mode = Mode.BI):
-        super(ModalityAwareFusion, self).__init__()
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.d_ff = 4* d_model
+    def __init__(
+        self,
+        d_model: int,
+        num_modalities: int,
+        num_heads: int,
+        devices: List[str],
+        mode: Mode = Mode.BI,
+    ):
+        super().__init__()
+        self.mode = mode
         self.devices = devices
-        
-        if mode == Mode.BI:
-            self.cross_modal_attns = nn.ModuleList([ResidualBlock(d_model, ModuleType.CrossAttention, num_heads=num_heads) for i in range(2)])
-        elif mode == Mode.X2Y or mode == Mode.Y2X:
-            self.cross_modal_attns = ResidualBlock([ResidualBlock(d_model, ModuleType.CrossAttention, num_heads=num_heads)])
-        
-        self.ffn = ResidualBlock(d_model, ModuleType.FFN, num_modalities=num_modalities, d_ff=self.d_ff)
+        self.d_ff = 4 * d_model
 
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        # Move each modality into another devices for parallel computation
+        if mode == Mode.BI:
+            self.cross_x2y = ResidualBlock(
+                d_model, ModuleType.CrossAttention, num_heads=num_heads
+            )
+            self.cross_y2x = ResidualBlock(
+                d_model, ModuleType.CrossAttention, num_heads=num_heads
+            )
+        elif mode == Mode.X2Y:
+            self.cross = ResidualBlock(
+                d_model, ModuleType.CrossAttention, num_heads=num_heads
+            )
+        elif mode == Mode.Y2X:
+            self.cross = ResidualBlock(
+                d_model, ModuleType.CrossAttention, num_heads=num_heads
+            )
+
+        self.ffn = ResidualBlock(
+            d_model, ModuleType.FFN, num_modalities=num_modalities, d_ff=self.d_ff
+        )
+
+    def forward(self, x, y):
         x = x.to(self.devices[0])
         y = y.to(self.devices[1])
 
-        # Cross-Modal Layers
         if self.mode == Mode.BI:
-            x2y = self.cross_modal_attns[0](x, y)
-            y2x = self.cross_modal_attns[1](y, x)
-            out = torch.cat([x2y, y2x], axis=-1)
+            x2y = self.cross_x2y(y, x)
+            y2x = self.cross_y2x(x, y)
+            out = torch.cat([x2y, y2x], dim=-1)
         elif self.mode == Mode.X2Y:
-            out = self.cross_modal_attns[0](x, y)
-        elif self.mode == Mode.Y2X:
-            out = self.cross_modal_attns[0](y, x)
+            out = self.cross(Q=y, KV=x)
+        else:
+            out = self.cross(Q=x, KV=y)
 
         return self.ffn(out)
-
