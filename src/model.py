@@ -1,6 +1,6 @@
 import math
 from enum import Enum
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -90,7 +90,7 @@ class ResidualBlock(nn.Module):
         return out
 
 
-class Mode(Enum):
+class FusionMode(Enum):
     BI = 0
     X2Y = 1
     Y2X = 2
@@ -102,26 +102,26 @@ class ModalityAwareFusion(nn.Module):
         d_model: int,
         num_modalities: int,
         num_heads: int,
-        devices: List[str],
-        mode: Mode = Mode.BI,
+        device: str,
+        mode: FusionMode = FusionMode.BI,
     ):
         super().__init__()
         self.mode = mode
-        self.devices = devices
+        self.device = device
         self.d_ff = 4 * d_model
 
-        if mode == Mode.BI:
+        if mode == FusionMode.BI:
             self.cross_x2y = ResidualBlock(
                 d_model, ModuleType.CrossAttention, num_heads=num_heads
             )
             self.cross_y2x = ResidualBlock(
                 d_model, ModuleType.CrossAttention, num_heads=num_heads
             )
-        elif mode == Mode.X2Y:
+        elif mode == FusionMode.X2Y:
             self.cross = ResidualBlock(
                 d_model, ModuleType.CrossAttention, num_heads=num_heads
             )
-        elif mode == Mode.Y2X:
+        elif mode == FusionMode.Y2X:
             self.cross = ResidualBlock(
                 d_model, ModuleType.CrossAttention, num_heads=num_heads
             )
@@ -131,14 +131,14 @@ class ModalityAwareFusion(nn.Module):
         )
 
     def forward(self, x, y):
-        x = x.to(self.devices[0])
-        y = y.to(self.devices[1])
+        x = x.to(self.device)
+        y = y.to(self.device)
 
-        if self.mode == Mode.BI:
+        if self.mode == FusionMode.BI:
             x2y = self.cross_x2y(y, x)
             y2x = self.cross_y2x(x, y)
             out = torch.cat([x2y, y2x], dim=-1)
-        elif self.mode == Mode.X2Y:
+        elif self.mode == FusionMode.X2Y:
             out = self.cross(Q=y, KV=x)
         else:
             out = self.cross(Q=x, KV=y)
@@ -148,7 +148,7 @@ class ModalityAwareFusion(nn.Module):
 
 class Classifier(nn.Module):
     def __init__(self, d_model: int, num_classes: int):
-        super().__init__()
+        super(Classifier, self).__init__()
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
         self.norm = nn.LayerNorm(d_model)
         self.fc = nn.Linear(d_model, num_classes)
