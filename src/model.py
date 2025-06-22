@@ -7,22 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# Cross-Attention Block
 class MultiHeadCrossModalAttention(nn.Module):
-    """
-    Implements multi-head cross-modal-attention.
-
-    Args:
-        d_model (int): Model dimensionality.
-        num_heads (int): Number of attention heads.
-
-    Example:
-        cross_attn = MultiHeadCrossModalAttention(d_model=512, num_heads=8)
-        x = torch.rand(2, 10, 512)  # Key-value input
-        q = torch.rand(2, 5, 512)   # Query input
-        output = cross_attn(x, q)   # Output shape (2, 5, 512)
-    """
-
     def __init__(self, d_model: int, num_heads: int):
         super(MultiHeadCrossModalAttention, self).__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
@@ -35,16 +20,6 @@ class MultiHeadCrossModalAttention(nn.Module):
         self.scale = math.sqrt(self.head_dim)
 
     def forward(self, x: torch.Tensor, Q: torch.Tensor) -> torch.Tensor:
-        """
-        Computes multi-head cross-modal-attention.
-
-        Args:
-            x (torch.Tensor): Key-value input of shape (batch_size, seq_len_kv, d_model).
-            q (torch.Tensor): Query input of shape (batch_size, seq_len_q, d_model).
-
-        Returns:
-            torch.Tensor: Output tensor of shape (batch_size, seq_len_q, d_model).
-        """
         B, T, C = x.shape
         Q = self.q_proj(Q)
         Q_T = Q.size(1)
@@ -56,47 +31,22 @@ class MultiHeadCrossModalAttention(nn.Module):
         K = K.reshape(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         V = V.reshape(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
-        attn_scores = (Q @ K.transpose(-2, -1)) / self.scale  # (B, num_heads, Q_T, T)
+        attn_scores = (Q @ K.transpose(-2, -1)) / self.scale
         attn_probs = F.softmax(attn_scores, dim=-1)
-        attn_output = (
-            (attn_probs @ V).transpose(1, 2).contiguous().view(B, Q_T, C)
-        )  # (B, num_heads, Q_T, head_dim) => (B, Q_T, num_heads, head_dim) => (B, Q_T, C)
+        attn_output = (attn_probs @ V).transpose(1, 2).contiguous().view(B, Q_T, C)
 
         return self.out_proj(attn_output)
 
 
 # FeedForward Block
 class FeedForward(nn.Module):
-    """
-    Implements a position-wise feed-forward network (FFN) used in Transformer blocks.
-
-    Args:
-        d_model (int): The dimensionality of the model.
-        num_modalities (int): The number of modalities to fuse
-        d_ff (int): The hidden layer size in the feed-forward network.
-
-    Example:
-        ffn = FeedForward(d_model=512, d_ff=2048)
-        x = torch.rand(2, 10, 512)
-        output = ffn(x)  # Output shape (2, 10, 512)
-    """
-
     def __init__(self, d_model: int, num_modalities: int, d_ff: int):
         super(FeedForward, self).__init__()
         self.fc1 = nn.Linear(d_model, d_ff)
         self.fc2 = nn.Linear(d_ff, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Applies the feed-forward network.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, d_model).
-
-        Returns:
-            torch.Tensor: Output tensor of the same shape.
-        """
-        return self.fc2(F.gelu(self.fc1(x)))  # GELU activation for non-linearity
+        return self.fc2(F.gelu(self.fc1(x)))
 
 
 class ModuleType(Enum):
@@ -194,3 +144,18 @@ class ModalityAwareFusion(nn.Module):
             out = self.cross(Q=x, KV=y)
 
         return self.ffn(out)
+
+
+class Classifier(nn.Module):
+    def __init__(self, d_model: int, num_classes: int):
+        super().__init__()
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        self.norm = nn.LayerNorm(d_model)
+        self.fc = nn.Linear(d_model, num_classes)
+
+    def forward(self, x):
+        B = x.size(0)
+        cls_token = self.cls_token.expand(B, -1, -1)
+        x = torch.cat([cls_token, x], dim=1)
+        x = self.norm(x)
+        return self.fc(x[:, 0])

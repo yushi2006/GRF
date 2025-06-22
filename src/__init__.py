@@ -1,9 +1,15 @@
-from .model import MultiHeadCrossModalAttention, MultiHeadSelfAttention, FeedForward, ResidualBlock, ModalityAwareFusion
+from .model import (
+    Classifier,
+    FeedForward,
+    ModalityAwareFusion,
+    MultiHeadCrossModalAttention,
+    ResidualBlock,
+)
 
 __all__ = [
-    'MultiHeadCrossModalAttention',
-    'MultiHeadSelfAttention',
-    'FeedForward',
-    'ResidualBlock',
-    'ModalityAwareFusion',
+    "MultiHeadCrossModalAttention",
+    "FeedForward",
+    "ResidualBlock",
+    "ModalityAwareFusion",
+    "Classifier",
 ]
