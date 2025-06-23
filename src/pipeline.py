@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from .model import Classifier, FusionMode, ModalityAwareFusion
 from .multimodalDataset import MultiModalDataset
+from .unimodalDataset import UniModalDataset
 
 
 class Mode(Enum):
@@ -18,7 +19,7 @@ class Mode(Enum):
 class FusionPipeline:
     def __init__(
         self,
-        modalities: list[list[torch.Tensor]],
+        modalities: list[UniModalDataset],
         labels: list[float],
         num_heads: list[int],
         d_model: int,
@@ -66,15 +67,6 @@ class FusionPipeline:
             self.modalities[i] = self.unimodal_encoders[i](self.modalities[i])
 
     def fuse(self, batch_size: int = 64, fuser: int = 0):
-        # Here we need to do recursive modality fusion.
-        # We will choose two different modalities and do modality fusion on it.
-        # We can then remove the two modalities and replace them with the new modality.
-        # and we just recursively call the function again on the new list.
-        # This function should have two implemenations, one for eval and one for training.
-        # So in training we do the training mode in pytorch and do a for loop on the batch
-        # In eval we should run the eval thing for pytorch.
-        # if we finished this pipeline correctly we can start experiementing the idea and then publish the results
-
         # Get two modalties
         if len(self.modalities) >= 2:
             X = self.modalities.pop()
@@ -105,7 +97,8 @@ class FusionPipeline:
                     fused_features.append(features)
 
             # Append new modality to list
-            self.modalities.append(fused_features)
+            fused_dataset = UniModalDataset(fused_features)
+            self.modalities.append(fused_dataset)
 
             # Recurse with next fusion head
             return self.fuse(batch_size, fuser + 1)

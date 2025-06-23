@@ -5,6 +5,8 @@ from .model import (
     MultiHeadCrossModalAttention,
     ResidualBlock,
 )
+from .multimodalDataset import MultiModalDataset
+from .unimodalDataset import UniModalDataset
 
 __all__ = [
     "MultiHeadCrossModalAttention",
@@ -12,4 +14,6 @@ __all__ = [
     "ResidualBlock",
     "ModalityAwareFusion",
     "Classifier",
+    "MultiModalDataset",
+    "UniModalDataset",
 ]
