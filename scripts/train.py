@@ -11,9 +11,8 @@ def train(
     dataloader: DataLoader,
     optim: optim.Optimizer,
     loss_fn: nn.Module,
-    fusion_heads: nn.ModuleList,
+    fusion_head: nn.Module,
     classifier_head: nn.Module,
-    fuser: int,
     modalities: list[UniModalDataset],
     epochs: int = 10,
 ):
@@ -21,7 +20,7 @@ def train(
         for x, y, labels in tqdm(dataloader):
             optim.zero_grad()
 
-            feature = fusion_heads[fuser](x, y)
+            feature = fusion_head(x, y)
             pred = classifier_head(feature)
 
             loss = loss_fn(pred, labels)
@@ -32,7 +31,7 @@ def train(
         fused_features = []
         with torch.no_grad():
             for x, y, _ in tqdm(dataloader):
-                fused_feature = fusion_heads[fuser](x, y)
+                fused_feature = fusion_head(x, y)
                 fused_features.append(fused_feature)
 
         new_feature = UniModalDataset(fused_features)
