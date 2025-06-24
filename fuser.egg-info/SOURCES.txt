@@ -1,0 +1,14 @@
+setup.py
+fuser.egg-info/PKG-INFO
+fuser.egg-info/SOURCES.txt
+fuser.egg-info/dependency_links.txt
+fuser.egg-info/top_level.txt
+scripts/__init__.py
+scripts/eval.py
+scripts/train.py
+src/__init__.py
+src/model.py
+src/multimodalDataset.py
+src/pipeline.py
+src/unimodalDataset.py
+tests/test_modules.py
