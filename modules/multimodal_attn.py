@@ -48,14 +48,12 @@ class MultiheadAttention(nn.Module):
         batch_size, seq_len, _ = x.size()
         return x.view(batch_size, seq_len, self.num_heads, self.d_head).transpose(1, 2)
 
-    def forward(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        q_proj = self.W_q(q)
+    def forward(self, x: torch.Tensor, **kwargs) -> tuple[torch.Tensor, torch.Tensor]:
+        k = kwargs["k"]
+        v = kwargs["v"] if kwargs["v"] is not None else k
+        mask = kwargs["mask"]
+
+        q_proj = self.W_q(x)
         k_proj = self.W_k(k)
         v_proj = self.W_v(v)
 
@@ -76,4 +74,4 @@ class MultiheadAttention(nn.Module):
 
         final_output = self.W_o(concatenated_output)
 
-        return final_output
+        return (attention_output, final_output)
