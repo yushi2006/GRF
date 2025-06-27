@@ -7,91 +7,66 @@ from tqdm import tqdm
 from ..src import UniModalDataset
 
 
-def train(
-    dataloader: DataLoader,
-    optim: optim.Optimizer,
-    loss_fn: nn.Module,
-    fusion_head: nn.Module,
-    classifier_head: nn.Module,
-    modalities: list[UniModalDataset],
-    epochs: int = 10,
-) -> dict[str, list]:
-    epoch_losses = []
-    epoch_accuracies = []
-    epoch_f1s = []
-
-    device = next(fusion_head.parameters()).device  # Get device from model
-
+def train_loop(dataloader, optimizer, scheduler, loss_fn, encoder, classifier, device, epochs):
+    encoder.to(device); classifier.to(device)
     for epoch in range(epochs):
-        fusion_head.train()
-        classifier_head.train()
-        total_loss = 0.0
-        all_preds = []
-        all_labels = []
-
-        # Training loop
-        for x, y, labels in tqdm(dataloader, desc=f"Epoch {epoch + 1}/{epochs}"):
-            x, y, labels = x.to(device), y.to(device), labels.to(device)
-            optim.zero_grad()
-
-            feature = fusion_head(x, y)
-            pred = classifier_head(feature)
+        encoder.train(); classifier.train()
+        for batch in tqdm(dataloader, desc=f"Epoch {epoch + 1}/{epochs} [Training]", leave=False):
+            x_a, l_a, x_b, l_b, labels = [t.to(device) for t in batch]
+            optimizer.zero_grad()
+            mutual_rep = encoder(x_a, l_a, x_b, l_b)
+            pred = classifier(mutual_rep)
             loss = loss_fn(pred, labels)
-
             loss.backward()
-            optim.step()
+            torch.nn.utils.clip_grad_norm_(chain(encoder.parameters(), classifier.parameters()), max_norm=0.8)
+            optimizer.step()
+        scheduler.step()
 
-            # Accumulate loss
-            total_loss += loss.item() * len(labels)
+def run_training(hparams: Dict, loaders: Dict, device: torch.device, save_dir: str) -> str:
+    print("\n" + "="*20 + " STARTING TRAINING PHASE " + "="*20)
+    train_start_time = time.time()
+    
+    encoder = MULTModel(d_in_t=loaders['d_in_t'], d_in_a=loaders['d_in_a'], d_in_v=loaders['d_in_v'], **hparams['model']).to(device)
+    classifier = SentimentClassifierHead(hparams['model']['d_model'], hparams['num_classes']).to(device)
+    
+    class_counts = torch.bincount(loaders['train'].dataset.labels); class_weights = len(loaders['train'].dataset.labels) / (len(class_counts) * class_counts.float())
+    loss_fn = nn.CrossEntropyLoss(weight=class_weights.to(device))
+    optimizer = AdamW(chain(encoder.parameters(), classifier.parameters()), lr=hparams['lr'], weight_decay=1e-2)
+    scheduler = CosineAnnealingLR(optimizer, T_max=hparams['epochs'], eta_min=1e-6)
 
-            # Collect predictions and true labels
-            pred_labels = torch.argmax(pred.detach(), dim=1)
-            all_preds.append(pred_labels.cpu())
-            all_labels.append(labels.cpu())
+    best_val_f1 = 0.0
+    best_model_path = os.path.join(save_dir, "best_mult_model.pth")
+    os.makedirs(save_dir, exist_ok=True)
+    
+    with mlflow.start_run(run_name="MOSI_MULT_Baseline_Training"):
+        loggable_hparams = {**hparams, **hparams['model']}
+        del loggable_hparams['model']
+        mlflow.log_params(loggable_hparams)
+        total_params = count_parameters(encoder) + count_parameters(classifier)
+        mlflow.log_metric("total_trainable_params", total_params)
+        print(f"Total trainable parameters: {total_params:,}")
 
-        # Compute metrics for the epoch
-        all_preds = torch.cat(all_preds)
-        all_labels = torch.cat(all_labels)
-        n_samples = len(all_labels)
+        for epoch in range(hparams['epochs']):
+            encoder.train(); classifier.train()
+            for batch in tqdm(loaders['train'], desc=f"Epoch {epoch + 1}/{hparams['epochs']}", leave=False):
+                x_t, l_t, x_a, l_a, x_v, l_v, labels = [t.to(device) for t in batch]
+                optimizer.zero_grad()
+                pred = classifier(encoder(x_t, l_t, x_a, l_a, x_v, l_v))
+                loss = loss_fn(pred, labels)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(chain(encoder.parameters(), classifier.parameters()), max_norm=0.8)
+                optimizer.step()
+            scheduler.step()
 
-        # Average loss
-        avg_loss = total_loss / n_samples
-        epoch_losses.append(avg_loss)
+            val_metrics = evaluate(loaders['valid'], encoder, classifier, loss_fn, device)
+            print(f"Epoch {epoch + 1} | Val F1: {val_metrics['f1']:.4f} | Val Acc: {val_metrics['accuracy']:.4f}")
+            mlflow.log_metrics({"val_f1": val_metrics['f1'], "val_accuracy": val_metrics['accuracy']}, step=epoch)
 
-        # Accuracy
-        correct = (all_preds == all_labels).sum().item()
-        accuracy = correct / n_samples
-        epoch_accuracies.append(accuracy)
-
-        # Macro F1 Score
-        classes = torch.unique(all_labels).tolist()
-        f1_scores = []
-        for c in classes:
-            tp = ((all_preds == c) & (all_labels == c)).sum().item()
-            fp = ((all_preds == c) & (all_labels != c)).sum().item()
-            fn = ((all_preds != c) & (all_labels == c)).sum().item()
-
-            precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-            if precision + recall > 0:
-                f1 = 2 * (precision * recall) / (precision + recall)
-            else:
-                f1 = 0.0
-            f1_scores.append(f1)
-
-        macro_f1 = sum(f1_scores) / len(f1_scores)
-        epoch_f1s.append(macro_f1)
-
-        # Generate fused features for new modality
-        fused_features = []
-        fusion_head.eval()
-        with torch.no_grad():
-            for x, y, _ in tqdm(dataloader, desc="Generating fused features"):
-                x, y = x.to(device), y.to(device)
-                fused_feature = fusion_head(x, y)
-                fused_features.append(fused_feature.cpu())
-
-        new_feature = UniModalDataset(fused_features)
-        modalities.append(new_feature)
-
-    return {"loss": epoch_losses, "accuracy": epoch_accuracies, "f1": epoch_f1s}
+            if val_metrics['f1'] > best_val_f1:
+                best_val_f1 = val_metrics['f1']
+                torch.save({'encoder_state_dict': encoder.state_dict(), 'classifier_state_dict': classifier.state_dict()}, best_model_path)
+                print(f"  -> New best model saved with F1: {best_val_f1:.4f}")
+    
+    total_train_duration = time.time() - train_start_time
+    print(f"--- Training finished in {total_train_duration / 60:.2f} minutes. Best model saved to {best_model_path} ---")
+    return best_model_path

@@ -107,28 +107,23 @@ class FusionPipeline:
                 if step == self.num_fusion_steps - 1:
                     final_step_metrics = metrics
                     
-                    # --- GFLOPS CALCULATION FIX ---
                     sample_batch = next(iter(loader))
-                    # FIX 1: Exclude the label from the input tuple
                     sample_input = [t.to(self.device) for t in sample_batch[:-1]]
     
                     class CombinedModel(nn.Module):
                         def __init__(self, enc, cls): super().__init__(); self.encoder = enc; self.classifier = cls
-                        # FIX 2: Remove the unused 'lbls' parameter
                         def forward(self, x_a, l_a, x_b, l_b):
                             return self.classifier(self.encoder(x_a, l_a, x_b, l_b))
                     
                     combined_model = CombinedModel(encoder, classifier)
                     
-                    # FIX 3: Call the simplified calculate_gflops function
                     gflops_for_batch = calculate_gflops(combined_model, tuple(sample_input))
                     
-                    # We can report GFLOPS per sample for easier comparison
                     gflops_per_sample = gflops_for_batch / batch_size if gflops_for_batch > 0 else -1.0
                     
                     print(f"Final Step GFLOPS ({mode.name}): {gflops_per_sample:.4f} per sample")
                     mlflow.log_metric("gflops_per_sample", gflops_per_sample)
-                    final_step_metrics['gflops'] = gflops_per_sample # Store the per-sample value
+                    final_step_metrics['gflops'] = gflops_per_sample
     
         print(f"\n--- Pipeline {mode.name} finished ---")
         return {
