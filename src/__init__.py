@@ -1,27 +1,23 @@
+from .datasets import BimodalDataset, ModalityData, TrimodalDataset
 from .model import (
-    Classifier,
-    FeedForward,
-    Fuser,
-    FusionMode,
-    ModuleType,
-    MultiHeadCrossModalAttention,
+    BimodalTransformerEncoderLayer,
+    MultimodalTransformerLayer,
+    MULTModel,
     PositionalEncoding,
-    ResidualBlock,
-    TempConv,
+    SentimentClassifierHead,
+    TransformerEncoder,
 )
-from .multimodalDataset import MultiModalDataset
-from .unimodalDataset import UniModalDataset
+from .pipeline import FusionPipeline
 
 __all__ = [
-    "MultiHeadCrossModalAttention",
-    "FeedForward",
-    "ResidualBlock",
-    "Fuser",
-    "Classifier",
-    "MultiModalDataset",
-    "UniModalDataset",
-    "TempConv",
     "PositionalEncoding",
-    "FusionMode",
-    "ModuleType",
+    "BimodalTransformerEncoderLayer",
+    "TransformerEncoder",
+    "MultimodalTransformerLayer",
+    "MULTModel",
+    "SentimentClassifierHead",
+    "ModalityData",
+    "BimodalDataset",
+    "TrimodalDataset",
+    "FusionPipeline",
 ]
