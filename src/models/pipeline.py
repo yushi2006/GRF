@@ -1,17 +1,21 @@
 import os
+from datetime import datetime
 
 import mlflow
 import numpy as np
 import torch
 import torch.nn as nn
 import tqdm.auto as tqdm
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
+
+from src.utils import calculate_regression_metrics, log_dict_as_json
 
 from .modules import (
     CrossModalAttentionEncoder,
     GatedFusionUnit,
     SentimentRegressionHead,
 )
-from .utils import calculate_regression_metrics, log_dict_as_json
 
 
 class FusionPipeline(nn.Module):
@@ -40,7 +44,6 @@ class FusionPipeline(nn.Module):
             dropout=hparams["dropout"],
         )
 
-        # --- MODIFIED: Using GatedFusionUnit for merging representations ---
         self.gfu_1 = GatedFusionUnit(hparams["d_model"], hparams["dropout"])
         self.gfu_2 = GatedFusionUnit(hparams["d_model"], hparams["dropout"])
 

@@ -1,13 +1,15 @@
 import json
+from typing import Dict, Optional
 
 import mlflow
 import numpy as np
 import torch
+import torch.nn as nn
 from sklearn.metrics import f1_score
 from thop import profile
 
 
-def log_dict_as_json(data: Dict, filename: str, artifact_path: str = None):
+def log_dict_as_json(data: Dict, filename: str, artifact_path: Optional[str] = None):
     def convert(o):
         if isinstance(o, np.generic):
             return o.item()
