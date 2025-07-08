@@ -1,0 +1,33 @@
+{
+    "project_name": "Efficient_Fusion_CrossModal_Regression",
+    "run_name_template": "HierarchicalFusion-{order_name}-{num_classes}class",
+    "device": "cuda",
+    "model": {
+        "d_model": 64,
+        "num_layers": 4,
+        "d_ffn": 256,
+        "num_heads": 4,
+        "dropout": 0.2,
+        "aux_loss_weight": 0.4
+    },
+    "training": {
+        "learning_rate": 0.001,
+        "weight_decay": 0.01,
+        "epochs": 100,
+        "patience": 20,
+        "warmup_epochs": 5,
+        "batch_size": 32,
+        "max_grad_norm": 1.0
+    },
+    "data": {
+        "data_dir": "data",
+        "gdrive_id": "1A9Y2Pl4pugVMPzN7RJRtyw_7-7-j5JoT"
+    },
+    "model_save_dir": "saved_models",
+    "order": [
+        "text",
+        "vision",
+        "audio"
+    ],
+    "num_classes": 2
+}

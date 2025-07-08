@@ -1,4 +1,5 @@
 import math
+from typing import Dict
 
 import torch
 import torch.nn as nn
@@ -93,7 +94,82 @@ class GatedFusionUnit(nn.Module):
 class SentimentRegressionHead(nn.Module):
     def __init__(self, d_model, dropout=0.1):
         super().__init__()
-        self.regressor = nn.Linear(d_model, 1)
+        self.regressor = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 2, 1),
+        )
 
     def forward(self, x):
         return self.regressor(x)
+
+
+class HierarchicalFusionModel(nn.Module):
+    def __init__(self, config: Dict, modality_info: Dict):
+        super().__init__()
+        self.config = config
+        self.order = config["order"]
+        hparams = config["model"]
+        d_model = hparams["d_model"]
+
+        self.projectors = nn.ModuleDict(
+            {
+                name: nn.Linear(modality_info[name].features.shape[-1], d_model)
+                for name in modality_info
+            }
+        )
+        self.fusion_encoders = nn.ModuleList(
+            [
+                CrossModalAttentionEncoder(
+                    d_model,
+                    hparams["num_heads"],
+                    hparams["d_ffn"],
+                    hparams["num_layers"],
+                    hparams["dropout"],
+                )
+                for _ in range(len(self.order) - 1)
+            ]
+        )
+        self.gfus = nn.ModuleList(
+            [
+                GatedFusionUnit(d_model, hparams["dropout"])
+                for _ in range(len(self.order) - 1)
+            ]
+        )
+        self.regressor = SentimentRegressionHead(d_model, hparams["dropout"])
+        self.auxiliary_regressor = SentimentRegressionHead(d_model, hparams["dropout"])
+
+    def forward(self, *batch):
+        # Unpack batch according to the order defined in the collate_fn
+        modalities_data = {
+            name: (batch[2 * i], batch[2 * i + 1]) for i, name in enumerate(self.order)
+        }
+        projected = {
+            name: self.projectors[name](data[0])
+            for name, data in modalities_data.items()
+        }
+
+        current_state_seq = projected[self.order[0]]
+        current_lengths = modalities_data[self.order[0]][1]
+        intermediate_fusion_result = None
+
+        for i in range(len(self.order) - 1):
+            next_mod_name = self.order[i + 1]
+            state_repr, new_info = self.fusion_encoders[i](
+                current_state_seq,
+                current_lengths,
+                projected[next_mod_name],
+                modalities_data[next_mod_name][1],
+            )
+            fused_state = self.gfus[i](state_repr, new_info)
+            if i == 0:
+                intermediate_fusion_result = fused_state
+
+            current_state_seq = fused_state.unsqueeze(1)
+            current_lengths = torch.ones(fused_state.size(0), device=fused_state.device)
+
+        final_representation = fused_state
+        return self.regressor(final_representation), self.auxiliary_regressor(
+            intermediate_fusion_result
+        )
