@@ -2,7 +2,7 @@
 
 > 📄 Preprint: [arXiv:2507.02985](https://arxiv.org/pdf/2507.02985)  
 > 🧪 Submitted to: ACMMM 2025 Workshop UAVM
-> 🔥 TL;DR: We propose **GRF**, a lightweight gated recurrent fusion module that outperforms MulT on CMU-MOSI unaligned setting using 3× fewer parameters.
+> 🔥 TL;DR: We propose **GRF**, a lightweight gated recurrent fusion module that compete with MulT on CMU-MOSI unaligned setting using 1.5x fewer parameters.
 
 ---
 
